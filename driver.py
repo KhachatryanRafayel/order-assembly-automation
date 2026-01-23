@@ -1,5 +1,5 @@
 from selenium import webdriver
-from selenium.common import TimeoutException
+from selenium.common import TimeoutException, StaleElementReferenceException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
@@ -22,22 +22,29 @@ class Browser:
         self._main_window_id = self._driver.current_window_handle
 
     def click(self, selector):
-        by_method, selector = self._get_locator_type(selector)
+        by, selector = self._get_locator_type(selector)
         for attempt in range(3): #retries
             try:
-                self._wait.until(EC.element_to_be_clickable((by_method, selector))).click()
+                element = self._wait.until(EC.presence_of_element_located((by, selector)))
+                self._driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
+                self._wait.until(EC.element_to_be_clickable((by, selector)))
+                element.click()
                 return
-            except TimeoutException:
-                if self._click_js(by_method, selector): return
-                print(f"[{attempt+1}/{3}] Refreshing page")
-                self._driver.refresh()
+            except (TimeoutException, StaleElementReferenceException):
+                try:
+                    element = self._wait.until(EC.presence_of_element_located((by, selector)))
+                    self._driver.execute_script("arguments[0].click();", element) #js click
+                    return
+                except Exception:
+                    print(f"[{attempt+1}/{3}] Refreshing page")
+                    self._driver.refresh()
+        raise TimeoutException(f"Cannot click element: {selector}")
 
     def print_opened_tab_qr_and_close(self):
         driver = self._driver
         self._wait.until(lambda d: len(d.window_handles) > 1)
         new_window_id = [i for i in driver.window_handles if i != self._main_window_id][0]
         driver.switch_to.window(new_window_id)
-        sleep(1)
         driver.execute_script('window.print();')
         sleep(1)
         driver.close()
@@ -85,18 +92,7 @@ class Browser:
         options.add_argument('--kiosk-printing')
         options.add_argument("--profile-directory=Profile 2")
         options.add_argument("--window-size=1280,720")
-
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
         options.add_argument("--disable-blink-features=AutomationControlled")
         return options
-
-    def _click_js(self, by_method, selector):
-        try:
-            element = self._driver.find_element(by_method, selector)
-            self._driver.execute_script("arguments[0].click();", element)
-            print("Clicked via JS")
-            return True
-        except Exception as exc:
-            print(f"Unable to click via JS {exc}")
-            return False

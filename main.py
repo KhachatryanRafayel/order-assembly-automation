@@ -1,4 +1,5 @@
 from driver import Browser
+from time import sleep
 
 browser = Browser()
 
